@@ -23,7 +23,6 @@ class User < ApplicationRecord
   
     private
   
-    # Skip password validation on update if password is not being changed
     def password_required?
       new_record? || password.present?
     end

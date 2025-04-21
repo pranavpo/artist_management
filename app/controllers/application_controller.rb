@@ -5,7 +5,9 @@ class ApplicationController < ActionController::API
     rescue_from Pundit::NotAuthorizedError, with: :user_not_authorized
 
     def jwt_decode(token)
-        JWT.decode(token,Rails.application.secret_key_base)[0]
+        JWT.decode(token,Rails.application.secret_key_base, true, algorithm: 'HS256')[0]
+    rescue JWT::ExpiredSignature
+        render json: {error: "Token has expired"}, status: :unauthorized
     rescue JWT::DecodeError => e
         Rails.logger.error("JWT Decode Error: #{e.message}")
         nil
@@ -14,12 +16,14 @@ class ApplicationController < ActionController::API
     def authorize_request
         header = request.headers['Authorization']
         if header
-            token = header.split(' ').last
-            decoded = jwt_decode(token)
-            @current_user = User.find_by(id: decoded['user_id']) if decoded
-            Rails.logger.debug "Current User: #{@current_user.inspect}"
+          token = header.split(' ').last
+          decoded = jwt_decode(token)
+          return unless decoded.is_a?(Hash) 
+      
+          @current_user = User.find_by(id: decoded['user_id']) if decoded
+          Rails.logger.debug "Current User: #{@current_user.inspect}"
         else
-            render json: {error: "Unauthorized"}, status: :unauthorized
+          render json: { error: 'Unauthorized' }, status: :unauthorized
         end
     end
 
