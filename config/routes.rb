@@ -22,4 +22,7 @@ Rails.application.routes.draw do
   end
   
   resources :songs, only: [:show, :update, :destroy]
+
+  get '/artists/download', to: 'users#download_artists'
+  post '/artists/upload', to: 'users#upload_artists'
 end

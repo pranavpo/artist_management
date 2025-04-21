@@ -48,4 +48,12 @@ class UserPolicy
   def get_all_artist_managers?
     %w[super_admin].include?(current_user&.role)
   end
+
+  def download_artists?
+    get_all_artists?
+  end
+
+  def upload_artists?
+    get_all_artists?
+  end
 end

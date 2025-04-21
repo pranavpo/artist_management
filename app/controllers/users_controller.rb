@@ -1,5 +1,6 @@
 class UsersController < ApplicationController
   before_action :set_user, only: [:update, :destroy]
+  PER_PAGE = 5
 
   def create
     user = User.new(user_params)
@@ -79,8 +80,11 @@ class UsersController < ApplicationController
   
   def get_all_artists
     authorize User, :get_all_artists?
-    artists = Artist.includes(:user).joins(:user).where(users: {role: 'artist'}).order('users.created_at ASC')
-    formatted_artists = artists.map do |artist|
+    page = params[:page].to_i || 1
+    artists_query = Artist.includes(:user).joins(:user).where(users: {role: 'artist'}).order('users.created_at ASC')
+    paginated_artists = artists_query.page(page).per(PER_PAGE)
+    
+    formatted_artists = paginated_artists.map do |artist|
       {
         id: artist.id,
         first_released_year: artist.first_released_year,
@@ -88,13 +92,31 @@ class UsersController < ApplicationController
         user: artist.user.as_json(except: [:password_digest, :created_at, :updated_at])
       }
     end
-    render json: formatted_artists, status: :ok
+    
+    render json: {
+      artists: formatted_artists,
+      meta: {
+        current_page: paginated_artists.current_page,
+        total_pages: paginated_artists.total_pages,
+        total_count: artists_query.count
+      }
+    }, status: :ok
   end
 
   def get_all_artist_managers
     authorize User, :get_all_artist_managers?
-    artist_managers = User.where(role: 'artist_manager').order(created_at: :asc).as_json(except: [:password_digest, :created_at, :updated_at])
-    render json: artist_managers, status: :ok
+    page = params[:page].to_i || 1
+    artist_managers_query = User.where(role: 'artist_manager').order(created_at: :asc)
+    paginated_managers = artist_managers_query.page(page).per(PER_PAGE)
+    
+    render json: {
+      artist_managers: paginated_managers.as_json(except: [:password_digest, :created_at, :updated_at]),
+      meta: {
+        current_page: paginated_managers.current_page,
+        total_pages: paginated_managers.total_pages,
+        total_count: artist_managers_query.count
+      }
+    }, status: :ok
   end
 
   def show
@@ -113,6 +135,67 @@ class UsersController < ApplicationController
     else
       render json: { error: 'User not found' }, status: :not_found
     end
+  end
+
+  require 'csv'
+
+  def download_artists
+    authorize User, :download_artists?
+
+    artists = Artist.includes(:user).where(users: {role: 'artist'})
+
+    csv_data = CSV.generate(headers: true) do |csv|
+      csv << ["First Name","Last Name", "Email", "Phone", "DOB", "Gender", "Address","First Released Year", "Number of Albums Released"]
+      artists.each do |artist|
+        user = artist.user
+        csv << [
+          user.first_name,
+          user.last_name,
+          user.email,
+          user.phone,
+          user.dob,
+          user.gender,
+          user.address,
+          artist.first_released_year,
+          artist.number_of_albums_released
+        ]
+      end
+    end
+    send_data csv_data, filename: "artists+#{Date.today}.csv"
+  end
+
+  def upload_artists
+    authorize User, :upload_artists?
+
+    file = params[:file]
+    if file.nil?
+      return render json: {error: 'No file provided'}, status: :bad_request
+    end
+
+    CSV.foreach(file.path, headers:true) do |row|
+      user = User.new(
+        role: 'artist',
+        first_name: row['First Name'],
+        last_name: row['Last Name'],
+        email: row['Email'],
+        phone: row['Phone'],
+        dob: row['DOB'],
+        gender: row['Gender'],
+        address: row['Address'],
+        password: "Password123"
+      )
+
+      if user.save
+        Artist.create!(
+          user_id: user.id,
+          first_released_year: row['First Released Year'],
+          number_of_albums_released: row['Number of Albums Released']
+        )
+      else
+        Rails.logger.error "Failed to import artist #{row['Email']}: #{user.errors.full_messages.join(', ')}"
+      end
+    end
+    render json: { message: 'Artists uploaded successfully'}, status: :ok
   end
 
   private
