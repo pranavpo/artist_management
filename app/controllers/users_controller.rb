@@ -1,5 +1,6 @@
 class UsersController < ApplicationController
   before_action :set_user, only: [:update, :destroy]
+  skip_before_action :authorize_request, only: [:register_artist]
   PER_PAGE = 5
 
   def create
@@ -16,7 +17,7 @@ class UsersController < ApplicationController
           number_of_albums_released: params[:number_of_albums_released]
         )
         unless artist.save
-          user.destroy # rollback
+          user.destroy
           return render json: { artist_errors: artist.errors.full_messages }, status: :unprocessable_entity
         end
       end
@@ -166,13 +167,14 @@ class UsersController < ApplicationController
 
   def upload_artists
     authorize User, :upload_artists?
-
+  
     file = params[:file]
-    if file.nil?
-      return render json: {error: 'No file provided'}, status: :bad_request
-    end
-
-    CSV.foreach(file.path, headers:true) do |row|
+    return render json: { error: 'No file provided' }, status: :bad_request if file.nil?
+  
+    success_count = 0
+    failure_count = 0
+  
+    CSV.foreach(file.path, headers: true) do |row|
       user = User.new(
         role: 'artist',
         first_name: row['First Name'],
@@ -184,18 +186,54 @@ class UsersController < ApplicationController
         address: row['Address'],
         password: "Password123"
       )
-
+  
       if user.save
         Artist.create!(
           user_id: user.id,
           first_released_year: row['First Released Year'],
           number_of_albums_released: row['Number of Albums Released']
         )
+        success_count += 1
       else
+        failure_count += 1
         Rails.logger.error "Failed to import artist #{row['Email']}: #{user.errors.full_messages.join(', ')}"
       end
     end
-    render json: { message: 'Artists uploaded successfully'}, status: :ok
+  
+    render json: {
+      message: "Artist upload completed. #{success_count} Uploaded, #{failure_count} Failed"
+    }, status: :ok
+  end
+
+  def register_artist
+    if params[:role] != 'artist'
+      return render json: {error: 'Only artist role is allowed'}, status: :unprocessable_entity
+    end
+
+    user = User.new(register_artist_params.merge(role: 'artist'))
+
+    unless artist_params_present? 
+      return render json: {error: 'First released year and number of albums released are required'}
+    end
+
+    if user.save
+      artist = Artist.new(
+        user_id: user.id,
+        first_released_year: params[:first_released_year],
+        number_of_albums_released: params[:number_of_albums_released]
+      )
+      if artist.save
+        render json: {
+          user: user.as_json(except: [:password_digest, :created_at, :updated_at]),
+          artist: artist
+        }, status: :created
+      else
+        user.destroy
+        render json: {error: artist.errors.full_messages}, status: :unprocessable_entity
+      end
+    else
+      render json: {error: user.errors.full_messages}, status: :unprocessable_entity
+    end
   end
 
   private
@@ -210,6 +248,10 @@ class UsersController < ApplicationController
     permitted = params.permit(:first_name, :last_name, :email, :password, :phone, :dob, :gender, :address)
     permitted[:role] = params[:role] if current_user.role == 'super_admin'
     permitted
+  end
+
+  def register_artist_params
+    permitted = params.permit(:first_name, :last_name, :email, :password, :phone, :dob, :gender, :address)
   end
 
   def artist_params_present?

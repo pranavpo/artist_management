@@ -7,6 +7,7 @@ Rails.application.routes.draw do
   get "auth/login"
   # Authentication routes
   post '/login', to: 'auth#login'
+  post '/register-artist', to: 'users#register_artist'
   # RESTful user routes (create, update, destroy)
   resources :users, only: [:create, :update, :destroy]
   get '/users', to: 'users#get_all_users'
